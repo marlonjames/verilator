@@ -9,9 +9,18 @@
 //
 //*************************************************************************
 
-#include "Vt_vpi_cbs_called.h"
+#ifdef IS_VPI
+
+#include "vpi_user.h"
+#include <cstdlib>
+
+#else
+
+#include "Vt_vpi_cb_valuechange.h"
 #include "verilated.h"
 #include "verilated_vpi.h"
+
+#endif
 
 #include <cstdlib>
 #include <cstdio>
@@ -22,29 +31,29 @@
 #include "TestSimulator.h"
 #include "TestVpi.h"
 
-#include "vpi_user.h"
-
-const std::vector<int> cbs_to_test{cbReadWriteSynch,    cbReadOnlySynch,   cbNextSimTime,
-                                   cbStartOfSimulation, cbEndOfSimulation, cbValueChange};
+const std::vector<int> cbs_to_test{cbValueChange};
 
 enum CallbackState { PRE_REGISTER, ACTIVE, ACTIVE_AGAIN, REM_REREG_ACTIVE, POST_REMOVE };
 const std::vector<CallbackState> cb_states{PRE_REGISTER, ACTIVE, ACTIVE_AGAIN, REM_REREG_ACTIVE,
                                            POST_REMOVE};
 
 #define CB_COUNT cbAtEndOfSimTime + 1
-TestVpiHandle vh_registered_cbs[CB_COUNT] = {0};
+TestVpiHandle vh_cb;
 
-unsigned int callback_counts[CB_COUNT] = {0};
-unsigned int callback_expected_counts[CB_COUNT] = {0};
+unsigned int callback_count = 0;
+unsigned int callback_expected_count = 0;
 
-bool callbacks_called[CB_COUNT] = {false};
-bool callbacks_expected_called[CB_COUNT] = {false};
+bool callbacks_called = false;
+bool callbacks_expected_called = false;
 
-std::vector<int>::const_iterator cb_iter;
 std::vector<CallbackState>::const_iterator state_iter;
 
 unsigned int main_time = 0;
 bool got_error = false;
+
+#ifdef IS_VPI
+vpiHandle vh_clk;
+#endif
 
 #ifdef TEST_VERBOSE
 bool verbose = true;
@@ -68,75 +77,55 @@ bool verbose = false;
         return __LINE__; \
     }
 
-#define STRINGIFY_CB_CASE(_cb) \
-    case _cb: return #_cb
-
-static const char* cb_reason_to_string(int cb_name) {
-    switch (cb_name) {
-        STRINGIFY_CB_CASE(cbReadWriteSynch);
-        STRINGIFY_CB_CASE(cbReadOnlySynch);
-        STRINGIFY_CB_CASE(cbNextSimTime);
-        STRINGIFY_CB_CASE(cbStartOfSimulation);
-        STRINGIFY_CB_CASE(cbEndOfSimulation);
-        STRINGIFY_CB_CASE(cbValueChange);
-    default: return "Unsupported callback";
-    }
-}
-
-#undef STRINGIFY_CB_CASE
-
 static int the_callback(p_cb_data cb_data) {
-    callback_counts[cb_data->reason] = callback_counts[cb_data->reason] + 1;
+    callback_count = callback_count + 1;
     return 0;
 }
 
 static int register_cb(const int next_state) {
-    int cb = *cb_iter;
     t_cb_data cb_data_testcase;
     s_vpi_value v;  // Needed in this scope as is in cb_data
     bzero(&cb_data_testcase, sizeof(cb_data_testcase));
     cb_data_testcase.cb_rtn = the_callback;
-    cb_data_testcase.reason = cb;
+    cb_data_testcase.reason = cbValueChange;
 
+#ifdef IS_VPI
+    vpiHandle count_h = vpi_handle_by_name((PLI_BYTE8*)"t.count", 0);
+#else
     TestVpiHandle count_h = VPI_HANDLE("count");  // Needed in this scope as is in cb_data
+#endif
     CHECK_RESULT_NZ(count_h);
-    if (cb == cbValueChange) {
-        v.format = vpiSuppressVal;
+    v.format = vpiSuppressVal;
 
-        cb_data_testcase.obj = count_h;
-        cb_data_testcase.value = &v;
-    }
+    cb_data_testcase.obj = count_h;
+    cb_data_testcase.value = &v;
 
     // State of callback next time through loop
     if (verbose) vpi_printf(const_cast<char*>("     Updating callback for next loop:\n"));
     switch (next_state) {
     case ACTIVE: {
         if (verbose) {
-            vpi_printf(const_cast<char*>("     - Registering callback %s\n"),
-                       cb_reason_to_string(cb));
+            vpi_printf(const_cast<char*>("     - Registering callback cbValueChange\n"));
         }
-        vh_registered_cbs[cb].release();
-        vh_registered_cbs[cb] = vpi_register_cb(&cb_data_testcase);
+        vh_cb.release();
+        vh_cb = vpi_register_cb(&cb_data_testcase);
         break;
     }
     case REM_REREG_ACTIVE: {
         if (verbose) {
-            vpi_printf(const_cast<char*>("     - Removing callback %s and re-registering\n"),
-                       cb_reason_to_string(cb));
+            vpi_printf(
+                const_cast<char*>("     - Removing callback cbValueChange and re-registering\n"));
         }
-        int ret = vpi_remove_cb(vh_registered_cbs[cb]);
-        vh_registered_cbs[cb].freed();
+        int ret = vpi_remove_cb(vh_cb);
+        vh_cb.freed();
         CHECK_RESULT(ret, 1);
-        vh_registered_cbs[cb] = vpi_register_cb(&cb_data_testcase);
+        vh_cb = vpi_register_cb(&cb_data_testcase);
         break;
     }
     case POST_REMOVE: {
-        if (verbose) {
-            vpi_printf(const_cast<char*>("     - Removing callback %s\n"),
-                       cb_reason_to_string(cb));
-        }
-        int ret = vpi_remove_cb(vh_registered_cbs[cb]);
-        vh_registered_cbs[cb].freed();
+        if (verbose) { vpi_printf(const_cast<char*>("     - Removing callback cbValueChange\n")); }
+        int ret = vpi_remove_cb(vh_cb);
+        vh_cb.freed();
         CHECK_RESULT(ret, 1);
         break;
     }
@@ -148,15 +137,6 @@ static int register_cb(const int next_state) {
     return 0;
 }
 
-void reset_expected() {
-    for (int idx = 0; idx < CB_COUNT; idx++) { callbacks_expected_called[idx] = false; }
-}
-
-void cb_will_be_called(const int cb) {
-    callback_expected_counts[cb] = callback_expected_counts[cb] + 1;
-    callbacks_expected_called[cb] = true;
-}
-
 static int test_callbacks(p_cb_data cb_data) {
     t_cb_data cb_data_testcase;
     bzero(&cb_data_testcase, sizeof(cb_data_testcase));
@@ -164,18 +144,18 @@ static int test_callbacks(p_cb_data cb_data) {
     if (verbose) vpi_printf(const_cast<char*>("     Checking callback results\n"));
 
     // Check results from previous loop
-    int cb = *cb_iter;
-
-    auto count = callback_counts[cb];
-    auto exp_count = callback_expected_counts[cb];
+    auto count = callback_count;
+    auto exp_count = callback_expected_count;
     CHECK_RESULT(count, exp_count);
 
-    bool called = callbacks_called[cb];
-    bool exp_called = callbacks_expected_called[cb];
+#if !defined(IS_VPI)
+    bool called = callbacks_called;
+    bool exp_called = callbacks_expected_called;
     CHECK_RESULT(called, exp_called);
+#endif
 
     // Update expected values based on state of callback in next time through main loop
-    reset_expected();
+    callbacks_expected_called = false;
 
     const int current_state = *state_iter;
     const int next_state = (current_state + 1) % cb_states.size();
@@ -185,7 +165,8 @@ static int test_callbacks(p_cb_data cb_data) {
     case ACTIVE:
     case ACTIVE_AGAIN:
     case REM_REREG_ACTIVE: {
-        cb_will_be_called(*cb_iter);
+        callback_expected_count = callback_expected_count + 1;
+        callbacks_expected_called = true;
         break;
     }
     default: break;
@@ -196,13 +177,9 @@ static int test_callbacks(p_cb_data cb_data) {
 
     // Update iterators for next loop
     ++state_iter;
-    if (state_iter == cb_states.cend()) {
-        ++cb_iter;
-        state_iter = cb_states.cbegin();
-    }
 
     // Re-register this cb for next time step
-    if (cb_iter != cbs_to_test.cend()) {
+    if (state_iter != cb_states.cend()) {
         if (verbose) {
             vpi_printf(const_cast<char*>("     Re-registering test_callbacks for next loop\n"));
         }
@@ -213,7 +190,7 @@ static int test_callbacks(p_cb_data cb_data) {
         cb_data_n.reason = cbAfterDelay;
         t1.type = vpiSimTime;
         t1.high = 0;
-        t1.low = 1;
+        t1.low = 10;
         cb_data_n.time = &t1;
         cb_data_n.cb_rtn = test_callbacks;
         TestVpiHandle vh_test_cb = vpi_register_cb(&cb_data_n);
@@ -223,7 +200,35 @@ static int test_callbacks(p_cb_data cb_data) {
     return ret;
 }
 
-static int register_test_callback() {
+#ifdef IS_VPI
+// Toggle the clock in other simulators using VPI
+static int toggle_clock(p_cb_data data) {
+    s_vpi_value val;
+    s_vpi_time time = {vpiSimTime, 0, 0, 0};
+
+    val.format = vpiIntVal;
+    vpi_get_value(vh_clk, &val);
+    val.value.integer = !val.value.integer;
+    vpi_put_value(vh_clk, &val, &time, vpiInertialDelay);
+
+    s_vpi_time cur_time = {vpiSimTime, 0, 0, 0};
+    vpi_get_time(0, &cur_time);
+
+    if (cur_time.low < 100 && !got_error) {
+        t_cb_data cb_data;
+        bzero(&cb_data, sizeof(cb_data));
+        time.low = 5;
+        cb_data.reason = cbAfterDelay;
+        cb_data.time = &time;
+        cb_data.cb_rtn = toggle_clock;
+        vpi_register_cb(&cb_data);
+    }
+
+    return 0;
+}
+#endif
+
+static int register_test_callback(p_cb_data data) {
     t_cb_data cb_data;
     bzero(&cb_data, sizeof(cb_data));
     s_vpi_time t1;
@@ -233,17 +238,56 @@ static int register_test_callback() {
     cb_data.reason = cbAfterDelay;
     t1.type = vpiSimTime;
     t1.high = 0;
-    t1.low = 1;
+    t1.low = 10;
     cb_data.time = &t1;
     cb_data.cb_rtn = test_callbacks;
     TestVpiHandle vh_test_cb = vpi_register_cb(&cb_data);
     CHECK_RESULT_NZ(vh_test_cb);
 
-    cb_iter = cbs_to_test.cbegin();
     state_iter = cb_states.cbegin();
+
+#ifdef IS_VPI
+    t1.low = 1;
+    cb_data.cb_rtn = toggle_clock;
+    TestVpiHandle vh_toggle_cb = vpi_register_cb(&cb_data);
+    CHECK_RESULT_NZ(vh_toggle_cb);
+
+    vh_clk = vpi_handle_by_name((PLI_BYTE8*)"t.clk", 0);
+    CHECK_RESULT_NZ(vh_clk);
+#endif
 
     return 0;
 }
+
+#ifdef IS_VPI
+
+static int end_of_sim_cb(p_cb_data cb_data) {
+    if (!got_error) { fprintf(stdout, "*-* All Finished *-*\n"); }
+    return 0;
+}
+
+// cver entry
+void vpi_compat_bootstrap(void) {
+    t_cb_data cb_data;
+    bzero(&cb_data, sizeof(cb_data));
+    {
+        vpi_printf(const_cast<char*>("register start-of-sim callback\n"));
+        cb_data.reason = cbStartOfSimulation;
+        cb_data.time = 0;
+        cb_data.cb_rtn = register_test_callback;
+        vpi_register_cb(&cb_data);
+    }
+    {
+        cb_data.reason = cbEndOfSimulation;
+        cb_data.time = 0;
+        cb_data.cb_rtn = end_of_sim_cb;
+        vpi_register_cb(&cb_data);
+    }
+}
+// icarus entry
+void (*vlog_startup_routines[])() = {vpi_compat_bootstrap, 0};
+
+#else
 
 double sc_time_stamp() { return main_time; }
 
@@ -256,7 +300,7 @@ int main(int argc, char** argv, char** env) {
 
     if (verbose) VL_PRINTF("-- { Sim Time %d } --\n", main_time);
 
-    register_test_callback();
+    register_test_callback(nullptr);
 
     topp->eval();
     topp->clk = 0;
@@ -264,24 +308,16 @@ int main(int argc, char** argv, char** env) {
 
     while (vl_time_stamp64() < sim_time && !Verilated::gotFinish()) {
         if (verbose) {
-            VL_PRINTF("-- { Sim Time %d , Callback %s (%d) , Testcase State %d } --\n", main_time,
-                      cb_reason_to_string(*cb_iter), *cb_iter, *state_iter);
+            VL_PRINTF("-- { Sim Time %d , Callback cbValueChange (1) , Testcase State %d } --\n",
+                      main_time, *state_iter);
         }
 
         topp->eval();
 
-        for (const auto& i : cbs_to_test) {
-            if (verbose) {
-                VL_PRINTF("     Calling %s (%d) callbacks\t", cb_reason_to_string(i), i);
-            }
-            if (i == cbValueChange) {
-                cbs_called = VerilatedVpi::callValueCbs();
-            } else {
-                cbs_called = VerilatedVpi::callCbs(i);
-            }
-            if (verbose) VL_PRINTF(" - any callbacks called? %s\n", cbs_called ? "YES" : "NO");
-            callbacks_called[i] = cbs_called;
-        }
+        if (verbose) { VL_PRINTF("     Calling cbValueChange (1) callbacks\t"); }
+        cbs_called = VerilatedVpi::callValueCbs();
+        if (verbose) VL_PRINTF(" - any callbacks called? %s\n", cbs_called ? "YES" : "NO");
+        callbacks_called = cbs_called;
 
         VerilatedVpi::callTimedCbs();
 
@@ -310,3 +346,5 @@ int main(int argc, char** argv, char** env) {
     VL_DO_DANGLING(delete topp, topp);
     return 0;
 }
+
+#endif
