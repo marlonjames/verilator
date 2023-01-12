@@ -15,28 +15,30 @@
 #ifdef IS_VPI
 
 #include "vpi_user.h"
+
 #include <cstdlib>
 
 #else
 
-#include "Vt_vpi_onetime_cbs.h"
 #include "verilated.h"
 #include "verilated_vpi.h"
 
-#endif
+#include "Vt_vpi_onetime_cbs.h"
 
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <vector>
+#endif
 
 #include "TestSimulator.h"
 #include "TestVpi.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <vector>
+
 typedef struct {
     PLI_UINT32 count;
-    PLI_UINT32 *exp_times;
+    PLI_UINT32* exp_times;
     PLI_UINT32 number_of_exp_times;
 } cb_stats;
 
@@ -90,9 +92,7 @@ static const char* cb_reason_to_string(int cb_name) {
 bool cb_time_is_delay(int cb_name) {
     // For some callbacks, time is interpreted as a delay from current time
     // instead of an absolute time
-    if (cb_name == cbReadOnlySynch || cb_name == cbReadWriteSynch) {
-        return true;
-    }
+    if (cb_name == cbReadOnlySynch || cb_name == cbReadWriteSynch) { return true; }
     return false;
 }
 
@@ -102,7 +102,7 @@ static PLI_INT32 TheCallback(s_cb_data* data);
 static PLI_INT32 AtEndOfSimTimeCallback(s_cb_data* data) {
     s_vpi_time t;
 
-    cb_stats *stats = &CallbackStats[data->reason];
+    cb_stats* stats = &CallbackStats[data->reason];
 
     t.type = vpiSimTime;
     vpi_get_time(0, &t);
@@ -113,7 +113,7 @@ static PLI_INT32 AtEndOfSimTimeCallback(s_cb_data* data) {
     stats->count += 1;
 
     s_cb_data cb_data;
-    s_vpi_time time = {vpiSimTime, 0, 417, 0};    // non-zero time to check that it's ignored
+    s_vpi_time time = {vpiSimTime, 0, 417, 0};  // non-zero time to check that it's ignored
     cb_data.time = &time;
     cb_data.reason = cbNextSimTime;
     cb_data.cb_rtn = TheCallback;
@@ -123,16 +123,18 @@ static PLI_INT32 AtEndOfSimTimeCallback(s_cb_data* data) {
     return 0;
 }
 
-
 static PLI_INT32 TheCallback(s_cb_data* data) {
     s_vpi_time t;
 
-    cb_stats *stats = &CallbackStats[data->reason];
+    cb_stats* stats = &CallbackStats[data->reason];
 
     t.type = vpiSimTime;
     vpi_get_time(0, &t);
 
-    if (verbose) { vpi_printf(const_cast<char*>("- %s Callback @ %d\n"), cb_reason_to_string(data->reason), t.low); }
+    if (verbose) {
+        vpi_printf(const_cast<char*>("- %s Callback @ %d\n"), cb_reason_to_string(data->reason),
+                   t.low);
+    }
 
     CHECK_RESULT(t.low, stats->exp_times[stats->count]);
     stats->count += 1;
@@ -141,9 +143,9 @@ static PLI_INT32 TheCallback(s_cb_data* data) {
 
     s_cb_data cb_data;
     PLI_UINT32 next_time;
-    
+
     if (data->reason == cbNextSimTime) {
-        // if a cbNextSimTime calback is scheduled from 
+        // if a cbNextSimTime calback is scheduled from
         // another cbNextSimTime callback, it will
         // be called in the same timestep, so we need
         // to delay registering
@@ -152,14 +154,15 @@ static PLI_INT32 TheCallback(s_cb_data* data) {
         cb_data.cb_rtn = AtEndOfSimTimeCallback;
     } else {
         next_time = stats->exp_times[stats->count];
-        if (cb_time_is_delay(data->reason)) {
-            next_time -= t.low;
-        }
+        if (cb_time_is_delay(data->reason)) { next_time -= t.low; }
         cb_data.reason = data->reason;
         cb_data.cb_rtn = TheCallback;
     }
 
-    if (verbose) { vpi_printf(const_cast<char*>("  - Registering %s Callback with time = %d\n"), cb_reason_to_string(cb_data.reason), next_time); }
+    if (verbose) {
+        vpi_printf(const_cast<char*>("  - Registering %s Callback with time = %d\n"),
+                   cb_reason_to_string(cb_data.reason), next_time);
+    }
 
     s_vpi_time time = {vpiSimTime, 0, next_time, 0};
     cb_data.time = &time;
@@ -188,35 +191,35 @@ static PLI_INT32 StartOfSimulationCallback(s_cb_data* data) {
     cb_data.obj = 0;
     cb_data.cb_rtn = TheCallback;
 
-    CallbackStats[cbAtStartOfSimTime].exp_times = new PLI_UINT32[3]{5,15,20};
+    CallbackStats[cbAtStartOfSimTime].exp_times = new PLI_UINT32[3]{5, 15, 20};
     CallbackStats[cbAtStartOfSimTime].number_of_exp_times = 3;
     timerec.low = 5;
     cb_data.reason = cbAtStartOfSimTime;
     vpiHandle ASOSHandle = vpi_register_cb(&cb_data);
     CHECK_RESULT_NZ(ASOSHandle);
 
-    CallbackStats[cbReadWriteSynch].exp_times = new PLI_UINT32[3]{6,16,21};
+    CallbackStats[cbReadWriteSynch].exp_times = new PLI_UINT32[3]{6, 16, 21};
     CallbackStats[cbReadWriteSynch].number_of_exp_times = 3;
     timerec.low = 6;
     cb_data.reason = cbReadWriteSynch;
     vpiHandle RWHandle = vpi_register_cb(&cb_data);
     CHECK_RESULT_NZ(RWHandle);
 
-    CallbackStats[cbReadOnlySynch].exp_times = new PLI_UINT32[3]{7,17,22};
+    CallbackStats[cbReadOnlySynch].exp_times = new PLI_UINT32[3]{7, 17, 22};
     CallbackStats[cbReadOnlySynch].number_of_exp_times = 3;
     timerec.low = 7;
     cb_data.reason = cbReadOnlySynch;
     vpiHandle ROHandle = vpi_register_cb(&cb_data);
     CHECK_RESULT_NZ(ROHandle);
 
-    CallbackStats[cbNextSimTime].exp_times = new PLI_UINT32[9]{5,6,7,15,16,17,20,21,22};
+    CallbackStats[cbNextSimTime].exp_times = new PLI_UINT32[9]{5, 6, 7, 15, 16, 17, 20, 21, 22};
     CallbackStats[cbNextSimTime].number_of_exp_times = 9;
     timerec.low = 8;
     cb_data.reason = cbNextSimTime;
     vpiHandle NSTHandle = vpi_register_cb(&cb_data);
     CHECK_RESULT_NZ(NSTHandle);
 
-    CallbackStats[cbAtEndOfSimTime].exp_times = new PLI_UINT32[8]{5,6,7,15,16,17,20,21};
+    CallbackStats[cbAtEndOfSimTime].exp_times = new PLI_UINT32[8]{5, 6, 7, 15, 16, 17, 20, 21};
     CallbackStats[cbAtEndOfSimTime].number_of_exp_times = 8;
 
     return (0);
@@ -227,7 +230,7 @@ static int EndOfSimulationCallback(p_cb_data cb_data) {
     t.type = vpiSimTime;
     vpi_get_time(0, &t);
 
-    (void)cb_data; //Unused
+    (void)cb_data;  // Unused
 
     if (verbose) { vpi_printf(const_cast<char*>("- cbEndOfSimulation Callback @ %d\n"), t.low); }
 
@@ -249,9 +252,7 @@ static int EndOfSimulationCallback(p_cb_data cb_data) {
 // cver entry
 static void VPIRegister(void) {
     // Clear stats
-    for (int cb = 1; cb <= cbAtEndOfSimTime; cb++) {
-        CallbackStats[cb].count = 0;
-    }
+    for (int cb = 1; cb <= cbAtEndOfSimTime; cb++) { CallbackStats[cb].count = 0; }
     CallbackStats[cbStartOfSimulation].exp_times = new PLI_UINT32(0);
     CallbackStats[cbEndOfSimulation].exp_times = new PLI_UINT32(22);
     s_cb_data cb_data;

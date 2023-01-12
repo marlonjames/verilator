@@ -12,6 +12,7 @@
 #ifdef IS_VPI
 
 #include "vpi_user.h"
+
 #include <cstdlib>
 
 #else
@@ -63,7 +64,9 @@ bool verbose = false;
 #endif
 
 #ifdef IS_VPI
-#define END_TEST vpi_control(vpiStop); return 0;
+#define END_TEST \
+    vpi_control(vpiStop); \
+    return 0;
 #else
 #define END_TEST return __LINE__;
 #endif
@@ -111,7 +114,8 @@ static int register_cb(const int next_state) {
     cb_data_testcase.reason = cb;
 
 #ifdef IS_VPI
-    TestVpiHandle count_h = vpi_handle_by_name(const_cast<char*>("t.count"), 0);  // Needed in this scope as is in cb_data
+    TestVpiHandle count_h = vpi_handle_by_name(const_cast<char*>("t.count"),
+                                               0);  // Needed in this scope as is in cb_data
 #else
     TestVpiHandle count_h = VPI_HANDLE("count");  // Needed in this scope as is in cb_data
 #endif
@@ -251,7 +255,7 @@ static int toggle_clock(p_cb_data data) {
     val.value.integer = !val.value.integer;
     vpi_put_value(clk_h, &val, &time, vpiInertialDelay);
 
-    s_vpi_time cur_time= {vpiSimTime, 0, 0, 0};
+    s_vpi_time cur_time = {vpiSimTime, 0, 0, 0};
     vpi_get_time(0, &cur_time);
 
     if (cur_time.low < 100 && !got_error) {
@@ -359,14 +363,16 @@ int main(int argc, char** argv) {
 
         for (const auto& i : cbs_to_test) {
             if (verbose) {
-                VL_PRINTF("     Calling %s (%d) callbacks\n     >>>>\n", cb_reason_to_string(i), i);
+                VL_PRINTF("     Calling %s (%d) callbacks\n     >>>>\n", cb_reason_to_string(i),
+                          i);
             }
             if (i == cbValueChange) {
                 cbs_called = VerilatedVpi::callValueCbs();
             } else {
                 cbs_called = VerilatedVpi::callCbs(i);
             }
-            if (verbose) VL_PRINTF("     <<<<\n     Any callbacks called? %s\n", cbs_called ? "YES" : "NO");
+            if (verbose)
+                VL_PRINTF("     <<<<\n     Any callbacks called? %s\n", cbs_called ? "YES" : "NO");
             callbacks_called[i] = cbs_called;
         }
 
