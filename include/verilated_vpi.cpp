@@ -350,10 +350,17 @@ class VerilatedVpioVarIter final : public VerilatedVpio {
     const VerilatedScope* const m_scopep;
     VerilatedVarNameMap::const_iterator m_it;
     bool m_started = false;
+    const VerilatedScope* m_topscopep;
 
 public:
-    explicit VerilatedVpioVarIter(const VerilatedScope* scopep)
-        : m_scopep{scopep} {}
+    explicit VerilatedVpioVarIter(const VerilatedVpioScope* vop)
+        : m_scopep{vop->scopep()} {
+        if (VL_UNLIKELY(!std::strrchr(vop->fullname(), '.')))
+            // This is a toplevel, so get TOP scope to search for ports during vpi_scan.
+            m_topscopep = Verilated::threadContextp()->scopeFind("TOP");
+        else
+            m_topscopep = nullptr;
+    }
     ~VerilatedVpioVarIter() override = default;
     static VerilatedVpioVarIter* castp(vpiHandle h) {
         return dynamic_cast<VerilatedVpioVarIter*>(reinterpret_cast<VerilatedVpio*>(h));
@@ -374,6 +381,11 @@ public:
             if (VL_UNLIKELY(m_it == varsp->end())) {
                 delete this;  // IEEE 37.2.2 vpi_scan at end does a vpi_release_handle
                 return nullptr;
+            }
+            if (VL_UNLIKELY(m_topscopep)) {
+                const VerilatedVar* topvarp = m_topscopep->varFind(m_it->second.name());
+                if (topvarp)
+                    return ((new VerilatedVpioVar{topvarp, m_topscopep})->castVpiHandle());
             }
             return ((new VerilatedVpioVar{&(m_it->second), m_scopep})->castVpiHandle());
         }
@@ -1809,7 +1821,7 @@ vpiHandle vpi_iterate(PLI_INT32 type, vpiHandle object) {
     case vpiReg: {
         const VerilatedVpioScope* const vop = VerilatedVpioScope::castp(object);
         if (VL_UNLIKELY(!vop)) return nullptr;
-        return ((new VerilatedVpioVarIter{vop->scopep()})->castVpiHandle());
+        return ((new VerilatedVpioVarIter{vop})->castVpiHandle());
     }
     case vpiModule: {
         const VerilatedVpioModule* const vop = VerilatedVpioModule::castp(object);
